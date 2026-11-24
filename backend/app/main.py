@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -78,6 +78,10 @@ def create_app(storage_override=None) -> FastAPI:
     @application.get("/health")
     async def health():
         return {"status": "ok", "service": "ramshare-backend"}
+
+    @application.get("/install.sh")
+    async def root_install_script(request: Request):
+        return await providers.get_install_script(request)
 
     # Serve static frontend if available
     static_dir = os.environ.get("RAMSHARE_STATIC_DIR") or os.path.abspath(
