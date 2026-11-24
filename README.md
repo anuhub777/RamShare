@@ -99,6 +99,7 @@ docker compose up --build
 - [REST API Reference](docs/api-reference.md)
 - [Provider Desktop Agent Guide](docs/provider-agent-guide.md)
 - [AWS SAM Deployment Guide](docs/deployment-guide.md)
+- [Render Deployment Guide (Frontend + Backend)](docs/render-deployment.md)
 - [Security & Sandbox Model](docs/security.md)
 
 ---

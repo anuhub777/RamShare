@@ -1,0 +1,4 @@
+FROM python:3.11-slim
+WORKDIR /app
+USER nobody
+CMD ["python3", "-c", "import json, os, time; start=time.time(); params = json.load(open('/input/params.json')) if os.path.exists('/input/params.json') else {}; result = {k: str(v).upper() if isinstance(v, str) else v*2 if isinstance(v, (int,float)) else v for k,v in params.items()}; result['_processing_time'] = round(time.time()-start,4); os.makedirs('/output', exist_ok=True); json.dump({'status': 'complete', 'processed_data': result}, open('/output/result.json', 'w')); print(f'Data processing complete: {len(params)} fields processed')"]

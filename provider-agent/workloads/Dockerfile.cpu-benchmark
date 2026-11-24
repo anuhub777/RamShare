@@ -1,0 +1,4 @@
+FROM python:3.11-slim
+WORKDIR /app
+USER nobody
+CMD ["python3", "-c", "import math, json, os, time; start=time.time(); params = json.load(open('/input/params.json')) if os.path.exists('/input/params.json') else {}; n = params.get('iterations', 50000); [math.factorial(400) for _ in range(n)]; elapsed=time.time()-start; result = {'status': 'complete', 'iterations': n, 'elapsed_seconds': round(elapsed,3)}; os.makedirs('/output', exist_ok=True); json.dump(result, open('/output/result.json', 'w')); print(f'CPU benchmark complete: {n} iterations in {elapsed:.3f}s')"]

@@ -1,0 +1,4 @@
+FROM python:3.11-slim
+WORKDIR /app
+USER nobody
+CMD ["python3", "-c", "import json, os, random, time; start=time.time(); random.seed(42); params = json.load(open('/input/params.json')) if os.path.exists('/input/params.json') else {}; n = params.get('num_samples', 10); predictions = [round(random.gauss(0.5, 0.15), 4) for _ in range(n)]; confidence = [round(random.uniform(0.7, 0.99), 3) for _ in range(n)]; result = {'status': 'complete', 'model': 'ramshare-classifier-v1', 'predictions': predictions, 'confidence': confidence, 'num_samples': n, 'elapsed_seconds': round(time.time()-start,3)}; os.makedirs('/output', exist_ok=True); json.dump(result, open('/output/result.json', 'w')); print(f'ML inference: {n} samples processed')"]

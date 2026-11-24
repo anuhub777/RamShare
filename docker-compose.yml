@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ramshare-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - RAMSHARE_MODE=local
+      - RAMSHARE_BACKEND_HOST=0.0.0.0
+      - RAMSHARE_BACKEND_PORT=8000
+      - RAMSHARE_SECRET_KEY=docker-compose-local-dev-secret-key-2026
+      - RAMSHARE_DEBUG=true
+      - RAMSHARE_DATABASE_URL=/app/data/ramshare.db
+    volumes:
+      - ./backend:/app
+      - backend-storage:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ramshare-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-storage:

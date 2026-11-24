@@ -1,0 +1,3 @@
+Frontend : npm run dev
+Backend : python3 -m uvicorn app.main:app --port 8000 --reload
+Agent : python3 -m agent.main start

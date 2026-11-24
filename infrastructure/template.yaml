@@ -1,0 +1,307 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  RAMShare - Decentralized Peer-to-Peer Cloud Computing Marketplace
+  AWS Serverless Coordination Layer (Control Plane)
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Tracing: Active
+    Environment:
+      Variables:
+        RAMSHARE_MODE: aws
+        RAMSHARE_DEBUG: false
+        RAMSHARE_AWS_REGION: !Ref AWS::Region
+        RAMSHARE_DYNAMODB_USERS_TABLE: !Ref UsersTable
+        RAMSHARE_DYNAMODB_PROVIDERS_TABLE: !Ref ProvidersTable
+        RAMSHARE_DYNAMODB_JOBS_TABLE: !Ref JobsTable
+        RAMSHARE_DYNAMODB_CREDITS_TABLE: !Ref CreditTransactionsTable
+        RAMSHARE_SQS_JOB_QUEUE_URL: !Ref JobQueue
+        RAMSHARE_SQS_DLQ_URL: !Ref JobDeadLetterQueue
+        RAMSHARE_S3_BUCKET: !Ref StorageBucket
+        RAMSHARE_COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+        RAMSHARE_COGNITO_CLIENT_ID: !Ref CognitoUserPoolClient
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment stage name
+
+Resources:
+  # ====================================================================
+  # 1. Amazon Cognito (User Identity & Role-Based Auth)
+  # ====================================================================
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ramshare-users-${Stage}
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: roles
+          AttributeDataType: String
+          Mutable: true
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ramshare-client-${Stage}
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  # ====================================================================
+  # 2. Amazon API Gateway
+  # ====================================================================
+  RamShareApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+            Identity:
+              Header: Authorization
+
+  # ====================================================================
+  # 3. AWS Lambda API Engine (FastAPI via Mangum)
+  # ====================================================================
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_handlers.api.handler
+      CodeUri: ../backend/
+      Description: Core RAMShare API Gateway backend handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProvidersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CreditTransactionsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt JobQueue.QueueName
+        - S3CrudPolicy:
+            BucketName: !Ref StorageBucket
+      Events:
+        ProxyApiRoot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RamShareApi
+            Path: /
+            Method: ANY
+            Auth:
+              Authorizer: NONE
+        ProxyApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RamShareApi
+            Path: /{proxy+}
+            Method: ANY
+
+  # ====================================================================
+  # 4. Amazon DynamoDB Tables
+  # ====================================================================
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ramshare-users-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: username
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: username-index
+          KeySchema:
+            - AttributeName: username
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ProvidersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ramshare-providers-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: is_online
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-providers-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: online-providers-index
+          KeySchema:
+            - AttributeName: is_online
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ramshare-jobs-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: consumer_id
+          AttributeType: S
+        - AttributeName: provider_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: consumer-jobs-index
+          KeySchema:
+            - AttributeName: consumer_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: provider-jobs-index
+          KeySchema:
+            - AttributeName: provider_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-jobs-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  CreditTransactionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ramshare-credits-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: idempotency_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-transactions-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: idempotency-index
+          KeySchema:
+            - AttributeName: idempotency_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ====================================================================
+  # 5. Amazon SQS (Decoupled Job Queuing & Dead Letter Queue)
+  # ====================================================================
+  JobDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ramshare-job-dlq-${Stage}
+      MessageRetentionPeriod: 1209600 # 14 days
+
+  JobQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ramshare-job-queue-${Stage}
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  # ====================================================================
+  # 6. Amazon S3 (Workload inputs & execution results)
+  # ====================================================================
+  StorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ramshare-storage-${Stage}-${AWS::AccountId}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL for Stage
+    Value: !Sub "https://${RamShareApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/"
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+  CognitoClientId:
+    Description: Cognito User Pool App Client ID
+    Value: !Ref CognitoUserPoolClient
+  S3BucketName:
+    Description: S3 Storage Bucket
+    Value: !Ref StorageBucket
+  JobQueueUrl:
+    Description: SQS Job Queue URL
+    Value: !Ref JobQueue

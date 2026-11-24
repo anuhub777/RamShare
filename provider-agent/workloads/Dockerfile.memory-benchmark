@@ -1,0 +1,4 @@
+FROM python:3.11-slim
+WORKDIR /app
+USER nobody
+CMD ["python3", "-c", "import json, os, time; start=time.time(); params = json.load(open('/input/params.json')) if os.path.exists('/input/params.json') else {}; size_mb = min(params.get('size_mb', 256), 2048); data = bytearray(size_mb * 1024 * 1024); elapsed=time.time()-start; result = {'status': 'complete', 'allocated_mb': size_mb, 'elapsed_seconds': round(elapsed,3)}; os.makedirs('/output', exist_ok=True); json.dump(result, open('/output/result.json', 'w')); print(f'Memory benchmark: allocated {size_mb}MB in {elapsed:.3f}s')"]
